@@ -1,0 +1,136 @@
+---
+title: "Seir_i"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r}
+library(deSolve)
+library(reshape2)
+library(ggplot2)
+library(gridExtra)
+
+source('Seir_model.R')
+source('support.R')
+```
+
+Time-frame, and the most important Ireland-specific user-tunable parameters
+```{r}
+# Time measures: March 1st is t=1. March 2nd is t=2, etc.
+Start = -18
+hosts_guess_t = 1     # user will supply guess re number of hosts at this time
+intervention_t = 13   # 1st intervention
+intervention_t2 = 27  # 2nd intervention
+End = 60
+dt = 1/20
+today = as.numeric(difftime(Sys.Date(),as.Date("2020-3-1")))
+
+# Encourage user to experiment with these values
+R0_pre = 3
+R0_post = 1.05
+R0_post2 = 0.95
+# Number of hosts (exposed + infectious) at hosts_guess_t
+hosts_count_guess = 650
+
+
+
+```
+
+Other model parameters (empirical)
+
+```{r}
+# User may also want to experiment with these values, but
+# app should make clear that the default settings are well grounded
+# in the scientific literature
+infectious_period = 2.9 # from Goh epidemic simulator
+latent_period = 5.2     # from epidemic simulator (will need better source)
+```
+
+Seir model parameters based on above assumptions
+
+```{r}
+alpha = 1 / latent_period
+gamma = 1 / infectious_period
+beta1 = gamma * R0_pre
+beta2 = gamma * R0_post
+beta3 = gamma * R0_post2
+parameter_list = c (alpha, beta1, beta2, gamma, beta3, intervention_t, intervention_t2)
+
+
+```
+Compute initial SEIR state
+```{r}
+
+N = 4921500    # population of Republic (Wikipedia)
+hosts_guess = hosts_count_guess / N
+
+# compute I0 such that SEIR state (S=1, E=0, I=I0, R=0) at t=Start
+# will evolve, under SEIR dynamics, to a state with E+I = hosts_guess
+# at t = hosts_guess_t
+I0 = get_I0(hosts_guess, hosts_guess_t, Start, dt, seir_model, parameter_list)
+initial_values = c(S = 1, E = 0, I = I0, R = 0)
+
+
+
+```
+
+Solve.
+
+```{r}
+timepoints = seq (Start, End, by=dt)
+output = lsoda (initial_values, timepoints, seir_model, parameter_list, rtol=1e-7, atol=1e-7)
+```
+
+
+Estimate ICU admissions
+```{r}
+ICU_rate = 0.013  # highly uncertain; user may wish to experiment
+
+# Mean and coeffcient of variation of gamma-distributed delay to ICU.
+# Fiddling with these parameters might be an 'advanced' user option
+mu = 14
+CV = 0.4
+# filter width: number of mus to scan back. User doesn't need to play with this.
+k = 4
+
+
+# Compute ICU admissions per timestep, and hence also cumulative admissions.
+# Admissions rate now will be proportional to a weighted average of E values
+# over the past k*mu days.
+filter_weights <- ICU_rate*N*dt*dgamma(seq(0, k*mu, dt), shape=1/CV^2, rate=1/(mu * CV^2))
+admissions <- zp_filter(alpha*dt*output[,'E'], filter_weights)
+cumulative_admissions <- cumsum(admissions)
+```
+
+```{r}
+hse = read.csv('hse_data.csv')
+hse = hse[-14,]
+icupoints = nrow(hse)
+hse = cbind(day=((intervention_t+3):(intervention_t+3+icupoints-1)),hse)
+daily_icu = c()
+daily_icu[2:icupoints] = hse$icu[2:icupoints] - hse$icu[1:(icupoints-1)]
+daily_icu[1] = hse$icu[1]
+hse = cbind(hse,daily_icu)
+
+
+```
+
+Plots
+```{r, echo=F}
+disp = c(3,4)
+df = data.frame(time=output[,1],output[,disp]*N, ICU=cumulative_admissions)
+df = melt(df,id.vars = 'time', variable.name = 'series')
+p1 = ggplot(df, aes(time,value)) + geom_line(aes(colour = series))+geom_vline(xintercept=intervention_t,color="red",linetype="dashed")+
+  geom_vline(xintercept=intervention_t2,color="red",linetype="dashed") + geom_vline(xintercept=today,color="black",linetype="dashed")
+df = data.frame(time=output[,1], ICU= cumulative_admissions)
+df = melt(df,id.vars = 'time', variable.name = 'series')
+p2 = ggplot(df, aes(time,value)) + geom_line(color="black")+geom_vline(xintercept=intervention_t,color="red",linetype="dashed") + 
+  geom_vline(xintercept=intervention_t2,color="red",linetype="dashed") + geom_point(data=hse,mapping = aes(x=day,y=icu),color="red") + geom_vline(xintercept=today,color="black",linetype="dashed")
+grid.arrange(p1,p2,nrow=1)
+```
