@@ -15,6 +15,10 @@
 # Mon Apr  6 21:58:11 IST 2020 Brian (B.OSULLIVAN19@nuigalway.ie)
 # Remoce line "hse = hse[-14,]" (that was left in by mistake).
 
+# Tues Apr 7 Nick (nick.tosh@nuigalway.ie)
+# Tweaked plot axis labels, added plot titles, changed range of times
+# plotted, changed colour of E plot, reduced weight of dashed lines,
+# tweaked mins and step sizes for input parameters, and updated HSE data.
 
 if (!requireNamespace("shiny", quietly = TRUE))
   BiocManager::install("shiny")
@@ -90,7 +94,7 @@ server <- function(input, output) {
       
       HTML('<div style="display:inline-block; padding-right: 8px; padding-bottom: 5%; bottom: 15px; font-size: 11px">'),
       # Number of hosts (exposed + infectious) at hosts_guess_t
-      tags$div(class = "inline", numericInput("hosts_count_guess", label=HTML("Estimated number of affected individuals on 1/3/2020"), value = 650, min = 0, max = 1000, step = 10, width = "100px")),
+      tags$div(class = "inline", numericInput("hosts_count_guess", label=HTML("Estimated number of affected individuals (E+I) on 1/3/2020"), value = 650, min = 50, max = 10000, step = 50, width = "100px")),
       HTML('</div>'),
       
       
@@ -126,12 +130,12 @@ server <- function(input, output) {
       
       HTML('<div style="display:inline-block; padding-right: 16px; bottom: 15px; font-size: 11px">'),
       # Mean
-      numericInput("mu", "mean:", value = 14, min = 0, max = 1000, step = 0.1, width = "65px"),
+      numericInput("mu", "mean:", value = 14, min = 0.5, max = 30, step = 0.5, width = "65px"),
       HTML('</div>'),
       
       HTML('<div style="display:inline-block; padding-right: 16px; bottom: 15px; font-size: 11px">'),
       #coeffcient of variation
-      numericInput("CV", "coeff.var.:", value = 0.4, min = 0, max = 10, step = 0.1, width = "65px"),
+      numericInput("CV", "coeff.var.:", value = 0.4, min = 0.1, max = 1, step = 0.1, width = "65px"),
       HTML('</div>'),
       
       HTML('<div style="display:inline-block; padding-right: 0px; bottom: 15px; font-size: 11px">'),
@@ -235,13 +239,18 @@ server <- function(input, output) {
     
     # Plots
     disp = c(3,4)
+    dashed_size = 0.4
     df = data.frame(time=output[,1],output[,disp]*N, ICU=cumulative_admissions)
     df = melt(df,id.vars = 'time', variable.name = 'series')
-    p1 = ggplot(df, aes(time,value)) + geom_line(aes(colour = series)) +
-      geom_vline(xintercept=intervention_t,color="red",linetype="dashed") +
-      geom_vline(xintercept=intervention_t2,color="red",linetype="dashed") +
-      geom_vline(xintercept=today,color="black",linetype="dashed") +
-      scale_colour_manual(name = "Breakdown", values=c("red", "green","blue")) +
+    p1_t_start = -10
+    p1 = ggplot(df[df$time>=p1_t_start,], aes(time,value)) + geom_line(aes(colour = series)) +
+      xlab('time (days)') +
+      ylab('number of people') +
+      geom_vline(xintercept=intervention_t,color="red",linetype="dashed",size=dashed_size) +
+      geom_vline(xintercept=intervention_t2,color="red",linetype="dashed",size=dashed_size) +
+      geom_vline(xintercept=today,color="black",linetype="dashed", size=dashed_size) +
+      scale_colour_manual(name = "Breakdown", values=c("orange", "green","blue")) +
+      ggtitle('Epidemiological model') +
       theme(axis.text=element_text(size=14),
             axis.title=element_text(size=14),
             legend.text=element_text(size=12),
@@ -253,16 +262,24 @@ server <- function(input, output) {
     df = data.frame(time=output[,1], ICU= cumulative_admissions)
     df = melt(df,id.vars = 'time', variable.name = 'series')
     
+    p2_t_start = 0
+    p2_t_end = today + 6
+
+    # Comment out deaths for now...
     p2 = ggplot()+
-      geom_line(data=df,aes(y=value,x=time,colour="C.ICU")) +
-      geom_point(data=hse,aes(day,deaths, colour = "Deaths")) +
+      geom_line(data=df[df$time>=p2_t_start & df$time<=p2_t_end,],aes(y=value,x=time,colour="C.ICU")) +
+#      geom_point(data=hse,aes(day,deaths, colour = "Deaths")) +
       geom_point(data=hse,aes(day,icu, colour = "ICU")) +
-      scale_colour_manual(name = "Breakdown", values=c("blue", "black","red")) +
-      geom_line(color="black")+geom_vline(xintercept=intervention_t,color="red",linetype="dashed") +
-      geom_vline(xintercept=intervention_t2,color="red",linetype="dashed") +
-      geom_vline(xintercept=today,color="black",linetype="dashed") +
+#      scale_colour_manual(name = "Breakdown", values=c("blue", "black","red")) +
+      scale_colour_manual(name = "Breakdown", values=c("blue","red")) +
+      geom_line(color="black")+geom_vline(xintercept=intervention_t,color="red",linetype="dashed", size=dashed_size) +
+      geom_vline(xintercept=intervention_t2,color="red",linetype="dashed", size=dashed_size) +
+      geom_vline(xintercept=today,color="black",linetype="dashed", size=dashed_size) +
+      xlab('time (days)') +
+      ggtitle('HSE data') +
       theme(axis.text=element_text(size=14),
             axis.title=element_text(size=14),
+            axis.title.y = element_blank(),
             legend.text=element_text(size=12),
             legend.justification=c(1,1),legend.position=c(1,1),legend.title=element_blank()
       ) 
